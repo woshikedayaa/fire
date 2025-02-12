@@ -3,54 +3,36 @@ package main
 import (
 	"github.com/spf13/cobra"
 	"github.com/woshikedayaa/fire/common/convert"
-	E "github.com/woshikedayaa/fire/common/errors"
-	"path/filepath"
 )
 
 var (
 	sourceFormat convert.SourceFormat
 	outputPath   string
 	inputPath    string
+
+	targetFormat convert.TargetFormat
 )
 
 var (
-	convertCommand = &cobra.Command{
+	nftablesConvertCommand = &cobra.Command{
 		Use:   "convert",
 		Short: "Converts a file from one format to target format.",
 		Long: `Converts a file from one format to target format.
 Supported formats: geoip, mmdb, srs, mrs, txt`,
-		Example: "fire convert -s [SourceFormat] -i [Source] -o [Output]",
-		Args:    cobra.ExactArgs(2),
-		RunE:    convertF,
+		Example: "fire convert -S [SourceFormat] -T [TargetFormat] -i [Source] -o [Output] ",
+		RunE:    nftablesConvert,
 	}
 )
 
 func init() {
-	convertCommand.Flags().StringVarP((*string)(&sourceFormat), "source", "s", "", "Source format")
+	nftablesConvertCommand.Flags().StringVarP((*string)(&sourceFormat), "source-format", "S", "", "Source format")
+	nftablesConvertCommand.Flags().StringVarP((*string)(&outputPath), "output", "o", "/dev/stdin", "input path")
+	nftablesConvertCommand.Flags().StringVarP((*string)(&inputPath), "input", "i", "/dev/stdout", "output path")
+	nftablesConvertCommand.Flags().StringVarP((*string)(&targetFormat), "target-format", "T", "set", "convert target format")
 
-	commandNftables.AddCommand(convertCommand)
+	commandNftables.AddCommand(nftablesConvertCommand)
 }
 
-func convertF(cmd *cobra.Command, args []string) error {
-	if sourceFormat == "" {
-		switch filepath.Ext(args[0]) {
-		case ".mmdb":
-			sourceFormat = convert.SourceFormatMMDB
-		case ".srs":
-			sourceFormat = convert.SourceFormatSRS
-		case ".mrs":
-			sourceFormat = convert.SourceFormatMRS
-		case ".txt":
-			sourceFormat = convert.SourceFormatTXT
-		case "dat":
-			sourceFormat = convert.SourceFormatGEOIP
-		default:
-			return E.New("Unknown source format")
-		}
-	}
-
-	if !sourceFormat.Valid() {
-		return E.New("Invalid source format")
-	}
+func nftablesConvert(cmd *cobra.Command, args []string) error {
 	return nil
 }

@@ -14,9 +14,6 @@ var mainCommand = &cobra.Command{
 	Short: "fire is a tool for managing your nft firewall rules better",
 }
 
-func init() {
-	mainCommand.PersistentFlags().StringVarP(&workDir, "wd", "D", "/etc/nftables.d/", "Working directory")
-}
 func main() {
 	if err := mainCommand.Execute(); err != nil {
 		os.Exit(1)
