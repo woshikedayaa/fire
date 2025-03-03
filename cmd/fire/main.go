@@ -5,10 +5,6 @@ import (
 	"os"
 )
 
-var (
-	workDir string
-)
-
 var mainCommand = &cobra.Command{
 	Use:   "fire",
 	Short: "fire is a tool for managing your nft firewall rules better",
