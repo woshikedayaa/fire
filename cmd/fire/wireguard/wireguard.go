@@ -5,6 +5,7 @@ import (
 )
 
 var MainCommand = &cobra.Command{
+	Use:   "wg",
 	Short: "manage wireguard",
 	Long:  "",
 	RunE:  nil,

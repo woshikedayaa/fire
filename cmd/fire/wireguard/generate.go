@@ -2,7 +2,8 @@ package wireguard
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/woshikedayaa/fire/common/wireguard"
+	"github.com/woshikedayaa/fire/common/networks/ip"
+	"net/netip"
 )
 
 var generateCommand = &cobra.Command{
@@ -37,7 +38,13 @@ func init() {
 }
 
 func Generate(cmd *cobra.Command, arg []string) error {
+	pfx, err := netip.ParsePrefix("10.13.13.0/22")
+	if err != nil {
+		return err
+	}
 
-	iif := wireguard.Interface{}
-	
+	for v := range ip.FromPrefix(pfx) {
+		_ = v
+	}
+	return nil
 }
