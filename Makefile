@@ -1,6 +1,6 @@
 NAME = fire
 WORKDIR = .
-VERSION = $(shell cat $(WORKDIR)/.VERSION)
+VERSION = $(shell cat $(WORKDIR)/.VERSION)-commit-$(shell git rev-parse HEAD)
 OUTPUT = $(WORKDIR)/bin/$(NAME)
 VERSION_FLAG= -X github.com/woshikedayaa/${NAME}/cmd/${NAME}/version.Version=$(VERSION)
 LDFLAGS = $(VERSION_FLAG) -s -w

@@ -3,6 +3,7 @@ package wireguard
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	E "github.com/woshikedayaa/fire/common/errors"
 	"io"
 	"net/netip"
@@ -10,33 +11,56 @@ import (
 	"strings"
 )
 
+type InterfaceWithPeers struct {
+	Interface Interface `json:"interface"`
+	Peers     []Peer    `json:"peers"`
+}
+
 type Interface struct {
-	PrivateKey string       `json:"private_key"`
-	Addresses  []netip.Addr `json:"addresses"`
-	ListenPort uint16       `json:"listen_port"`
+	PrivateKey PrivateKey   `json:"private_key,omitempty"`
+	Addresses  []netip.Addr `json:"addresses,omitempty"`
+	ListenPort uint16       `json:"listen_port,omitempty"`
 
 	// Optional
-	DNS   []netip.Addr `json:"dns"`
-	MTU   int          `json:"mtu"`
-	Table string       `json:"table"`
+	DNS   []netip.Addr `json:"dns,omitempty"`
+	MTU   int          `json:"mtu,omitempty"`
+	Table string       `json:"table,omitempty"`
 
 	// Hook
-	PreUp    []string `json:"pre_up"`
-	PostUp   []string `json:"post_up"`
-	PreDown  []string `json:"pre_down"`
-	PostDown []string `json:"post_down"`
+	PreUp    []string `json:"pre_up,omitempty"`
+	PostUp   []string `json:"post_up,omitempty"`
+	PreDown  []string `json:"pre_down,omitempty"`
+	PostDown []string `json:"post_down,omitempty"`
 
 	// Misc
-	SaveConfig bool `json:"save_config"`
+	SaveConfig bool `json:"save_config,omitempty"`
 
 	ready bool
+}
+
+func NewInterface(priv PrivateKey) *Interface {
+	return &Interface{
+		PrivateKey: priv,
+	}
+}
+
+func (c *Interface) UnmarshalJSON(data []byte) error {
+	dupI := *c
+	de := json.NewDecoder(bytes.NewReader(data))
+	de.DisallowUnknownFields()
+	e := de.Decode(&dupI)
+	if e != nil {
+		return e
+	}
+	*c = dupI
+	return nil
 }
 
 func (c *Interface) MarshalText() (text []byte, err error) {
 	var buf bytes.Buffer
 
-	if c.PrivateKey != "" {
-		buf.WriteString("PrivateKey = " + c.PrivateKey + "\n")
+	if c.PrivateKey.IsValid() {
+		buf.WriteString("PrivateKey = " + c.PrivateKey.String() + "\n")
 	} else {
 		return nil, E.New("PrivateKey is required")
 	}
@@ -46,7 +70,7 @@ func (c *Interface) MarshalText() (text []byte, err error) {
 		for _, addr := range c.Addresses {
 			addresses = append(addresses, addr.String())
 		}
-		buf.WriteString("Address = " + strings.Join(addresses, ", ") + "\n")
+		buf.WriteString("Address = " + strings.Join(addresses, ",") + "\n")
 	}
 
 	if c.ListenPort > 0 {
@@ -108,15 +132,17 @@ func (c *Interface) UnmarshalText(text []byte) error {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 
-		c.parseInterfaceKeyValue(key, value)
+		if e := c.parseInterfaceKeyValue(key, value); e != nil {
+			return e
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return err
+		return E.When("Scan", err)
 	}
 
-	if newInterface.PrivateKey == "" {
-		return E.New("PrivateKey is required")
+	if !newInterface.PrivateKey.IsValid() {
+		return E.New("PrivateKey is not valid")
 	}
 
 	newInterface.ready = true
@@ -125,38 +151,42 @@ func (c *Interface) UnmarshalText(text []byte) error {
 	return nil
 }
 
-func (c *Interface) parseInterfaceKeyValue(key, value string) {
+func (c *Interface) parseInterfaceKeyValue(key, value string) error {
 	switch key {
 	case "PrivateKey":
-		c.PrivateKey = value
+		return c.PrivateKey.UnmarshalText([]byte(value))
 	case "Address":
 		addresses := strings.Split(value, ",")
 		for _, addrStr := range addresses {
 			addrStr = strings.TrimSpace(addrStr)
 			addr, parseErr := netip.ParseAddr(addrStr)
-			if parseErr == nil {
-				c.Addresses = append(c.Addresses, addr)
+			if parseErr != nil {
+				return parseErr
 			}
+			c.Addresses = append(c.Addresses, addr)
 		}
 	case "ListenPort":
 		port, parseErr := strconv.ParseUint(value, 10, 16)
-		if parseErr == nil {
-			c.ListenPort = uint16(port)
+		if parseErr != nil {
+			return parseErr
 		}
+		c.ListenPort = uint16(port)
 	case "DNS":
 		dnsAddresses := strings.Split(value, ",")
 		for _, dnsStr := range dnsAddresses {
 			dnsStr = strings.TrimSpace(dnsStr)
 			dns, parseErr := netip.ParseAddr(dnsStr)
-			if parseErr == nil {
-				c.DNS = append(c.DNS, dns)
+			if parseErr != nil {
+				return parseErr
 			}
+			c.DNS = append(c.DNS, dns)
 		}
 	case "MTU":
 		mtu, parseErr := strconv.Atoi(value)
-		if parseErr == nil {
-			c.MTU = mtu
+		if parseErr != nil {
+			return parseErr
 		}
+		c.MTU = mtu
 	case "Table":
 		c.Table = value
 	case "PreUp":
@@ -172,29 +202,48 @@ func (c *Interface) parseInterfaceKeyValue(key, value string) {
 			c.SaveConfig = true
 		}
 	}
+	return nil
 }
 
 type Peer struct {
-	PublicKey           string         `json:"public_key"`
-	PresharedKey        string         `json:"preshared_key"`
-	AllowedIPs          []netip.Prefix `json:"allowed_ips"`
-	Endpoint            string         `json:"endpoint"`
-	PersistentKeepalive string         `json:"persistent_keepalive"`
+	PublicKey           PublicKey      `json:"public_key,omitempty"`
+	PresharedKey        PresharedKey   `json:"preshared_key,omitempty"`
+	AllowedIPs          []netip.Prefix `json:"allowed_ips,omitempty"`
+	Endpoint            string         `json:"endpoint,omitempty"`
+	PersistentKeepalive int            `json:"persistent_keepalive,omitempty"`
 
 	ready bool
+}
+
+func NewPeer(pub PublicKey) *Peer {
+	return &Peer{
+		PublicKey: pub,
+	}
+}
+
+func (p *Peer) UnmarshalJSON(data []byte) error {
+	dupP := *p
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&dupP)
+	if err != nil {
+		return err
+	}
+	*p = dupP
+	return nil
 }
 
 func (p *Peer) MarshalText() (text []byte, err error) {
 	var buf bytes.Buffer
 
-	if p.PublicKey != "" {
-		buf.WriteString("PublicKey = " + p.PublicKey + "\n")
+	if p.PublicKey.IsValid() {
+		buf.WriteString("PublicKey = " + p.PublicKey.String() + "\n")
 	} else {
 		return nil, E.New("PublicKey is required")
 	}
 
-	if p.PresharedKey != "" {
-		buf.WriteString("PresharedKey = " + p.PresharedKey + "\n")
+	if p.PresharedKey.IsValid() {
+		buf.WriteString("PresharedKey = " + p.PresharedKey.String() + "\n")
 	}
 
 	if len(p.AllowedIPs) > 0 {
@@ -211,8 +260,8 @@ func (p *Peer) MarshalText() (text []byte, err error) {
 		buf.WriteString("Endpoint = " + p.Endpoint + "\n")
 	}
 
-	if p.PersistentKeepalive != "" {
-		buf.WriteString("PersistentKeepalive = " + p.PersistentKeepalive + "\n")
+	if p.PersistentKeepalive != 0 {
+		buf.WriteString("PersistentKeepalive = " + strconv.FormatInt(int64(p.PersistentKeepalive), 10) + "\n")
 	}
 
 	return buf.Bytes(), nil
@@ -238,15 +287,17 @@ func (p *Peer) UnmarshalText(text []byte) error {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 
-		p.parsePeerKeyValue(key, value)
+		if e := p.parsePeerKeyValue(key, value); e != nil {
+			return e
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 
-	if newPeer.PublicKey == "" {
-		return E.New("PublicKey is required")
+	if !newPeer.PublicKey.IsValid() {
+		return E.New("PublicKey is not valid")
 	}
 	if len(newPeer.AllowedIPs) == 0 {
 		return E.New("AllowedIPs is required")
@@ -258,26 +309,32 @@ func (p *Peer) UnmarshalText(text []byte) error {
 	return nil
 }
 
-func (p *Peer) parsePeerKeyValue(key, value string) {
+func (p *Peer) parsePeerKeyValue(key, value string) error {
 	switch key {
 	case "PublicKey":
-		p.PublicKey = value
+		return p.PublicKey.UnmarshalText([]byte(value))
 	case "PresharedKey":
-		p.PresharedKey = value
+		return p.PresharedKey.UnmarshalText([]byte(value))
 	case "AllowedIPs":
 		allowedIPs := strings.Split(value, ",")
 		for _, ipStr := range allowedIPs {
 			ipStr = strings.TrimSpace(ipStr)
 			prefix, parseErr := netip.ParsePrefix(ipStr)
-			if parseErr == nil {
-				p.AllowedIPs = append(p.AllowedIPs, prefix)
+			if parseErr != nil {
+				return parseErr
 			}
+			p.AllowedIPs = append(p.AllowedIPs, prefix)
 		}
 	case "Endpoint":
 		p.Endpoint = value
 	case "PersistentKeepalive":
-		p.PersistentKeepalive = value
+		keepalive, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		p.PersistentKeepalive = int(keepalive)
 	}
+	return nil
 }
 
 func ParseWireguardConf(in io.Reader) (iif Interface, peers []Peer, err error) {

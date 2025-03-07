@@ -28,3 +28,26 @@ func New(v ...any) error {
 
 	return &simpleError{msg: fmt.Sprint(vv...)}
 }
+
+type whenError struct {
+	e    error
+	when string
+}
+
+func (e *whenError) Unwrap() error {
+	return e.e
+}
+
+func (e *whenError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("when %s :%s", e.when, e.e.Error())
+}
+
+func When(work string, e error) error {
+	if e == nil {
+		return nil
+	}
+	return &whenError{when: work, e: e}
+}

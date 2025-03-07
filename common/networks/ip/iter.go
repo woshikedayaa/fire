@@ -5,7 +5,7 @@ import (
 	"net/netip"
 )
 
-func FromPrefix(prefix netip.Prefix) iter.Seq[netip.Addr] {
+func PrefixIter(prefix netip.Prefix) iter.Seq[netip.Addr] {
 	if !prefix.IsValid() {
 		panic("Invalid netip.Prefix")
 	}
