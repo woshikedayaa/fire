@@ -7,21 +7,19 @@ import (
 	"github.com/woshikedayaa/fire/common/wireguard"
 	"io"
 	"iter"
+	"net"
 	"net/netip"
 	"os"
+	"strconv"
 )
 
 const (
 	MaxPeerCount = 1 << 12
 )
 
-type GenerateResult struct {
-	Root  wireguard.InterfaceWithPeers   `json:"root"`
-	Peers []wireguard.InterfaceWithPeers `json:"peers"`
-}
-
 type GenerateConfig struct {
-	Count int `json:"count"`
+	Count                  int  `json:"count"`
+	SetupAllPeersInterface bool `json:"setup_all_peers_interface"`
 	// common sections
 	// dual stack supported
 	IPv4Cidr        string   `json:"ipv4_cidr"`
@@ -38,6 +36,7 @@ type GenerateConfig struct {
 	PreDown             []string `json:"pre_down"`
 	PostDown            []string `json:"post_down"`
 	Table               int      `json:"table"`
+	MTU                 int      `json:"mtu"`
 
 	// Peer section
 	AllowIPs            []string `json:"allow_ips"`
@@ -53,12 +52,39 @@ type GenerateConfig struct {
 	dns      []netip.Addr
 }
 
+func (c GenerateConfig) bindInterface(iif *wireguard.Interface) {
+	iif.PreUp = c.PreUp
+	iif.PreDown = c.PreDown
+	iif.PostUp = c.PostUp
+	iif.PostDown = c.PostDown
+	iif.MTU = c.MTU
+	iif.DNS = c.dns
+	iif.ListenPort = c.InterfaceListenPort
+	iif.Table = c.Table
+}
+
+func (c GenerateConfig) bindPeer(peer *wireguard.Peer) {
+	peer.AllowedIPs = c.allowIPs
+	if c.PersistentKeepalive > 0 {
+		peer.PersistentKeepalive = c.PersistentKeepalive
+	}
+	if peer.Endpoint != "" {
+		peer.Endpoint = net.JoinHostPort(c.Endpoint, strconv.FormatUint(uint64(c.EndpointPort), 10))
+	}
+}
+
 func (c GenerateConfig) Build() (GenerateConfig, error) {
 	if !c.IPv4 && !c.IPv6 {
 		c.IPv4 = true // enable ipv4 as default
 	}
 	if c.PersistentKeepalive <= -1 {
 		c.PersistentKeepalive = 0
+	}
+	if c.MTU <= 0 {
+		c.MTU = 1420
+	}
+	if c.Table <= 0 {
+		c.Table = 0
 	}
 	var err error
 	if c.IPv4 {
@@ -73,7 +99,7 @@ func (c GenerateConfig) Build() (GenerateConfig, error) {
 		if err != nil {
 			return GenerateConfig{}, err
 		}
-		c.Count = min(c.Count, 1<<(32-c.v6Prefix.Bits())-1)
+		c.Count = min(c.Count, 1<<min(128-c.v6Prefix.Bits(), 32)-1)
 	}
 	// use 32 instead of 128
 	c.Count = min(c.Count, MaxPeerCount)
@@ -136,6 +162,8 @@ func init() {
 	generateCommand.Flags().IntVarP(&generateConfig.PersistentKeepalive, "keep-alive", "k", -1, "PersistentKeepalive")
 	generateCommand.Flags().StringVarP(&generateConfig.Endpoint, "endpoint", "e", "", "Set peer endpoint address, use --endpoint-port to specified the endpoint port")
 	generateCommand.Flags().Uint16Var(&generateConfig.EndpointPort, "endpoint-port", 0, "Set Peer Endpoint Port, default == --interface-listen-port")
+	generateCommand.Flags().IntVar(&generateConfig.MTU, "mtu", 1420, "Set Interface MTU")
+
 }
 
 func Generate(cmd *cobra.Command, arg []string) error {
@@ -147,16 +175,14 @@ func Generate(cmd *cobra.Command, arg []string) error {
 }
 
 func generateRandom(gc GenerateConfig, out io.Writer) error {
-	rootPriv, rootPub, err := wireguard.GenKeyPair()
-	if err != nil {
-		return err
-	}
-	result := GenerateResult{}
-	result.Root.Interface.PrivateKey = rootPriv
-
 	var (
-		rootPeer       wireguard.Peer
-		subPeer        wireguard.InterfaceWithPeers
+		rootPriv = wireguard.GenPrivateKey()
+		result   = wireguard.MeshPair{Root: wireguard.InterfaceWithPeers{
+			Interface: wireguard.Interface{
+				PrivateKey: rootPriv,
+			},
+			Peers: nil,
+		}}
 		v4Next, v6Next func() (netip.Addr, bool)
 		v4Stop, v6Stop func()
 	)
@@ -176,40 +202,32 @@ func generateRandom(gc GenerateConfig, out io.Writer) error {
 			result.Root.Interface.Addresses = append(result.Root.Interface.Addresses, addr)
 		}
 	}
-	if gc.InterfaceListenPort > 0 {
-		result.Root.Interface.ListenPort = gc.InterfaceListenPort
-	}
 	for i := 0; i < gc.Count; i++ {
-		rootPeer, subPeer = wireguard.Peer{}, wireguard.InterfaceWithPeers{
-			Peers: []wireguard.Peer{{}}, // one element here
-		}
-		// generate privateKey and publicKey for this peer
-		priv, pub, err := wireguard.GenKeyPair()
+		extended, extendedIf, err := result.Root.Extend(gc.EnablePreshared)
 		if err != nil {
 			return err
 		}
-		subPeer.Peers[0].PublicKey = rootPub
-		subPeer.Peers[0].AllowedIPs = gc.allowIPs
-		subPeer.Interface.PrivateKey = priv
-		rootPeer.PublicKey = pub
-		if gc.InterfaceListenPort > 0 {
-			subPeer.Interface.ListenPort = gc.InterfaceListenPort
+		// cofigure
+		if gc.IPv4 {
+			if addr, ok := v4Next(); ok {
+				extendedIf.Interface.Addresses = append(extendedIf.Interface.Addresses, addr)
+				extended.Peers[len(extended.Peers)-1].AllowedIPs = append(extended.Peers[len(extended.Peers)-1].AllowedIPs, netip.PrefixFrom(addr, addr.BitLen()))
+			}
 		}
-		if len(gc.Endpoint) > 0 {
-			subPeer.Peers[0].Endpoint = gc.Endpoint
+		if gc.IPv6 {
+			if addr, ok := v6Next(); ok {
+				extendedIf.Interface.Addresses = append(extendedIf.Interface.Addresses, addr)
+				extended.Peers[len(extended.Peers)-1].AllowedIPs = append(extended.Peers[len(extended.Peers)-1].AllowedIPs, netip.PrefixFrom(addr, addr.BitLen()))
+			}
 		}
-		if gc.PersistentKeepalive > 0 {
-			subPeer.Peers[0].PersistentKeepalive = gc.PersistentKeepalive
-		}
-
-		if gc.EnablePreshared {
-			preshard := wireguard.GenPresharedKey()
-			rootPeer.PresharedKey = preshard
-			subPeer.Peers[0].PresharedKey = preshard
+		gc.bindPeer(&extendedIf.Peers[0])
+		if gc.SetupAllPeersInterface {
+			gc.bindInterface(&extendedIf.Interface)
 		}
 		// append
-		result.Root.Peers = append(result.Root.Peers, rootPeer)
-		result.Peers = append(result.Peers, subPeer)
+		result.Root = extended
+		result.Peers = append(result.Peers, extendedIf)
 	}
+	gc.bindInterface(&result.Root.Interface)
 	return json.NewEncoder(out).Encode(result)
 }

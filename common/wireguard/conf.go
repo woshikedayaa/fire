@@ -11,11 +11,6 @@ import (
 	"strings"
 )
 
-type InterfaceWithPeers struct {
-	Interface Interface `json:"interface"`
-	Peers     []Peer    `json:"peers"`
-}
-
 type Interface struct {
 	PrivateKey PrivateKey   `json:"private_key,omitempty"`
 	Addresses  []netip.Addr `json:"addresses,omitempty"`
@@ -24,7 +19,7 @@ type Interface struct {
 	// Optional
 	DNS   []netip.Addr `json:"dns,omitempty"`
 	MTU   int          `json:"mtu,omitempty"`
-	Table string       `json:"table,omitempty"`
+	Table int          `json:"table,omitempty"`
 
 	// Hook
 	PreUp    []string `json:"pre_up,omitempty"`
@@ -38,10 +33,9 @@ type Interface struct {
 	ready bool
 }
 
-func NewInterface(priv PrivateKey) *Interface {
-	return &Interface{
-		PrivateKey: priv,
-	}
+func (c *Interface) MarshalJSON() (data []byte, err error) {
+	type jsonAble Interface
+	return json.Marshal((*jsonAble)(c))
 }
 
 func (c *Interface) UnmarshalJSON(data []byte) error {
@@ -89,8 +83,8 @@ func (c *Interface) MarshalText() (text []byte, err error) {
 		buf.WriteString("MTU = " + strconv.Itoa(c.MTU) + "\n")
 	}
 
-	if c.Table != "" {
-		buf.WriteString("Table = " + c.Table + "\n")
+	if c.Table != 0 {
+		buf.WriteString("Table = " + strconv.Itoa(c.Table) + "\n")
 	}
 
 	for _, hook := range c.PreUp {
@@ -188,7 +182,11 @@ func (c *Interface) parseInterfaceKeyValue(key, value string) error {
 		}
 		c.MTU = mtu
 	case "Table":
-		c.Table = value
+		table, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		c.Table = int(table)
 	case "PreUp":
 		c.PreUp = append(c.PreUp, value)
 	case "PostUp":
@@ -215,10 +213,9 @@ type Peer struct {
 	ready bool
 }
 
-func NewPeer(pub PublicKey) *Peer {
-	return &Peer{
-		PublicKey: pub,
-	}
+func (p *Peer) MarshalJSON() (data []byte, err error) {
+	type jsonAble Peer
+	return json.Marshal((*jsonAble)(p))
 }
 
 func (p *Peer) UnmarshalJSON(data []byte) error {

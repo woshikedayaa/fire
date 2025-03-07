@@ -5,11 +5,16 @@ import (
 	"encoding/base64"
 	E "github.com/woshikedayaa/fire/common/errors"
 	"golang.org/x/crypto/curve25519"
+	"unsafe"
 )
 
 type PrivateKey [32]byte
 
 func (k PrivateKey) MarshalText() (text []byte, err error) {
+	if !k.IsValid() {
+		return nil, E.New("invalid private key")
+	}
+
 	text = make([]byte, base64.StdEncoding.EncodedLen(len(k)))
 	base64.StdEncoding.Encode(text, k[:])
 	return text, nil
@@ -44,6 +49,9 @@ func (k PrivateKey) IsValid() bool {
 type PublicKey [32]byte
 
 func (k PublicKey) MarshalText() (text []byte, err error) {
+	if !k.IsValid() {
+		return nil, E.New("invalid public key")
+	}
 	text = make([]byte, base64.StdEncoding.EncodedLen(len(k)))
 	base64.StdEncoding.Encode(text, k[:])
 	return text, nil
@@ -70,12 +78,15 @@ func (k PublicKey) String() string {
 }
 
 func (k PublicKey) IsValid() bool {
-	return !zeroKey(k)
+	return !zeroKey((*[32]byte)(&k))
 }
 
 type PresharedKey [32]byte
 
 func (k PresharedKey) MarshalText() (text []byte, err error) {
+	if !k.IsValid() {
+		return []byte{}, nil
+	}
 	text = make([]byte, base64.StdEncoding.EncodedLen(len(k)))
 	base64.StdEncoding.Encode(text, k[:])
 	return text, nil
@@ -102,7 +113,7 @@ func (k PresharedKey) String() string {
 }
 
 func (k PresharedKey) IsValid() bool {
-	return !zeroKey(k)
+	return !zeroKey((*[32]byte)(&k))
 }
 
 func GenPrivateKey() (priv PrivateKey) {
@@ -122,14 +133,11 @@ func GenPublicKey(priv PrivateKey) (pub PublicKey, err error) {
 	return pub, nil
 }
 
-func GenKeyPair() (priv PrivateKey, pub PublicKey, err error) {
+func GenKeyPair() (priv PrivateKey, pub PublicKey) {
 	priv = GenPrivateKey()
-	pub, err = GenPublicKey(priv)
-	if err != nil {
-		return PrivateKey{}, PublicKey{}, err
-	}
+	pub, _ = GenPublicKey(priv)
 
-	return priv, pub, nil
+	return priv, pub
 }
 
 func GenPresharedKey() (key PresharedKey) {
@@ -137,11 +145,7 @@ func GenPresharedKey() (key PresharedKey) {
 	return key
 }
 
-func zeroKey(k [32]byte) bool {
-	for _, v := range k {
-		if v != 0x00 {
-			return false
-		}
-	}
-	return true
+func zeroKey(k *[32]byte) bool {
+	p := (*[4]uint64)(unsafe.Pointer(&(*k)[0]))
+	return p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0
 }
