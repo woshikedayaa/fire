@@ -12,7 +12,7 @@ import (
 )
 
 type Interface struct {
-	PrivateKey PrivateKey   `json:"private_key,omitempty"`
+	PrivateKey PrivateKey   `json:"private_key,omitzero"`
 	Addresses  []netip.Addr `json:"addresses,omitempty"`
 	ListenPort uint16       `json:"listen_port,omitempty"`
 
@@ -204,8 +204,8 @@ func (c *Interface) parseInterfaceKeyValue(key, value string) error {
 }
 
 type Peer struct {
-	PublicKey           PublicKey      `json:"public_key,omitempty"`
-	PresharedKey        PresharedKey   `json:"preshared_key,omitempty"`
+	PublicKey           PublicKey      `json:"public_key,omitzero"`
+	PresharedKey        PresharedKey   `json:"preshared_key,omitzero"`
 	AllowedIPs          []netip.Prefix `json:"allowed_ips,omitempty"`
 	Endpoint            string         `json:"endpoint,omitempty"`
 	PersistentKeepalive int            `json:"persistent_keepalive,omitempty"`

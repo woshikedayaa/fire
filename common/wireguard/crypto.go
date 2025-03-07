@@ -40,6 +40,10 @@ func (k PrivateKey) String() string {
 	return string(text)
 }
 
+func (k PrivateKey) IsZero() bool {
+	return zeroKey((*[32]byte)(&k))
+}
+
 func (k PrivateKey) IsValid() bool {
 	return (k[0]&248) == k[0] &&
 		(k[31]&127) == k[31] &&
@@ -80,6 +84,9 @@ func (k PublicKey) String() string {
 func (k PublicKey) IsValid() bool {
 	return !zeroKey((*[32]byte)(&k))
 }
+func (k PublicKey) IsZero() bool {
+	return k.IsValid()
+}
 
 type PresharedKey [32]byte
 
@@ -114,6 +121,10 @@ func (k PresharedKey) String() string {
 
 func (k PresharedKey) IsValid() bool {
 	return !zeroKey((*[32]byte)(&k))
+}
+
+func (k PresharedKey) IsZero() bool {
+	return k.IsValid()
 }
 
 func GenPrivateKey() (priv PrivateKey) {
